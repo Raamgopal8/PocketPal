@@ -6,11 +6,8 @@ import 'bootstrap/dist/css/bootstrap.min.css'
 import { ApolloClient, InMemoryCache, ApolloProvider, createHttpLink } from '@apollo/client/index.js'
 import { setContext } from '@apollo/client/link/context/index.js'
 
-const API_URI = import.meta.env.VITE_API_URL || 
-  (import.meta.env.PROD ? 'https://pocket-pal-8e8y.vercel.app/_/backend/graphql':'http://localhost:4000/graphql');
-
 const httpLink = createHttpLink({
-  uri: API_URI,
+  uri: 'http://localhost:4000/graphql',
 })
 
 const authLink = setContext((_, { headers }) => {

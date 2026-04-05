@@ -82,7 +82,7 @@ const resolvers = {
     me: async (_, __, { user }) => {
       if (!user) return null;
       const db = getDb();
-      const { rows } = await db.query('SELECT id, username, role, status, created_at as "createdAt" FROM users WHERE id = $1', [user.id]);
+      const { rows } = await db.query('SELECT id, username, role, status, created_at as "createdAt" FROM users WHERE id = ?', [user.id]);
       return rows[0] || null;
     },
     users: async (_, __, { user }) => {
@@ -100,23 +100,23 @@ const resolvers = {
 
       if (type) {
         params.push(type);
-        query += ` AND type = $${params.length}`;
+        query += ` AND type = ?`;
       }
       if (category) {
         params.push(category);
-        query += ` AND category = $${params.length}`;
+        query += ` AND category = ?`;
       }
       if (startDate) {
         params.push(startDate);
-        query += ` AND date >= $${params.length}`;
+        query += ` AND date >= ?`;
       }
       if (endDate) {
         params.push(endDate);
-        query += ` AND date <= $${params.length}`;
+        query += ` AND date <= ?`;
       }
       if (search) {
-        params.push(`%${search}%`);
-        query += ` AND (description ILIKE $${params.length} OR category ILIKE $${params.length})`;
+        params.push(`%${search}%`, `%${search}%`);
+        query += ` AND (description LIKE ? OR category LIKE ?)`;
       }
 
       // Get total count for pagination
@@ -127,7 +127,7 @@ const resolvers = {
       // Apply pagination
       const offset = (page - 1) * limit;
       params.push(limit, offset);
-      query += ` ORDER BY date DESC LIMIT $${params.length - 1} OFFSET $${params.length}`;
+      query += ` ORDER BY date DESC LIMIT ? OFFSET ?`;
       const { rows: transactions } = await db.query(query, params);
 
       return {
@@ -168,7 +168,7 @@ const resolvers = {
   Mutation: {
     login: async (_, { username, password }) => {
       const db = getDb();
-      const { rows } = await db.query('SELECT * FROM users WHERE username = $1', [username]);
+      const { rows } = await db.query('SELECT * FROM users WHERE username = ?', [username]);
       const user = rows[0];
       if (!user) throw new AuthenticationError('User Not Found or Access Blocked. Please contact admin');
       
@@ -192,13 +192,12 @@ const resolvers = {
     createTransaction: async (_, args, { user }) => {
       if (!user || user.role !== 'Admin') throw new AuthenticationError('Unauthorized');
       const db = getDb();
-      const { rows: insertRows } = await db.query(
-        'INSERT INTO transactions (user_id, amount, type, category, date, description) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id', 
+      const { lastID } = await db.query(
+        'INSERT INTO transactions (user_id, amount, type, category, date, description) VALUES (?, ?, ?, ?, ?, ?)', 
         [user.id, args.amount, args.type, args.category, args.date, args.description]
       );
       
-      const id = insertRows[0].id;
-      const { rows } = await db.query('SELECT id, user_id as "userId", amount, type, category, date, description, created_at as "createdAt" FROM transactions WHERE id = $1', [id]);
+      const { rows } = await db.query('SELECT id, user_id as "userId", amount, type, category, date, description, created_at as "createdAt" FROM transactions WHERE id = ?', [lastID]);
       return rows[0];
     },
     updateTransaction: async (_, { id, ...args }, { user }) => {
@@ -221,23 +220,23 @@ const resolvers = {
       }
       
       params.push(id);
-      const query = `UPDATE transactions SET ${fields.join(', ')} WHERE id = $${params.length}`;
+      const query = `UPDATE transactions SET ${fields.join(', ')} WHERE id = ?`;
       await db.query(query, params);
       
-      const { rows } = await db.query('SELECT id, user_id as "userId", amount, type, category, date, description, created_at as "createdAt" FROM transactions WHERE id = $1', [id]);
+      const { rows } = await db.query('SELECT id, user_id as "userId", amount, type, category, date, description, created_at as "createdAt" FROM transactions WHERE id = ?', [id]);
       return rows[0];
     },
     deleteTransaction: async (_, { id }, { user }) => {
       if (!user || user.role !== 'Admin') throw new AuthenticationError('Unauthorized');
       const db = getDb();
-      const result = await db.query('UPDATE transactions SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1', [id]);
+      const result = await db.query('UPDATE transactions SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?', [id]);
       return result.rowCount > 0;
     },
     updateUserStatus: async (_, { id, status }, { user }) => {
       if (!user || user.role !== 'Admin') throw new AuthenticationError('Unauthorized');
       const db = getDb();
-      await db.query('UPDATE users SET status = $1 WHERE id = $2', [status, id]);
-      const { rows } = await db.query('SELECT id, username, role, status, created_at as "createdAt" FROM users WHERE id = $1', [id]);
+      await db.query('UPDATE users SET status = ? WHERE id = ?', [status, id]);
+      const { rows } = await db.query('SELECT id, username, role, status, created_at as "createdAt" FROM users WHERE id = ?', [id]);
       return rows[0];
     }
   }
