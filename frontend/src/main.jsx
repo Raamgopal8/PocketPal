@@ -6,8 +6,11 @@ import 'bootstrap/dist/css/bootstrap.min.css'
 import { ApolloClient, InMemoryCache, ApolloProvider, createHttpLink } from '@apollo/client/index.js'
 import { setContext } from '@apollo/client/link/context/index.js'
 
+const API_URI = import.meta.env.VITE_API_URL || 
+  (import.meta.env.PROD ? '/_/backend/graphql' : 'http://localhost:4000/graphql');
+
 const httpLink = createHttpLink({
-  uri: 'http://localhost:4000/graphql',
+  uri: API_URI,
 })
 
 const authLink = setContext((_, { headers }) => {

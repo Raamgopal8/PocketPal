@@ -1,6 +1,6 @@
-# Fintech Dashboard
+# PocketPal (Fintech Dashboard)
 
-A professional, high-fidelity Fintech Dashboard application built with React, GraphQL, and Node.js. This project features a robust role-based access control system, real-time data visualization (conceptually), and a sleek, modern UI.
+**PocketPal** is a professional, high-fidelity Fintech Dashboard application built with React, GraphQL, and Node.js. This project features a robust role-based access control system, real-time data visualization (conceptually), and a sleek, modern UI.
 
 ## 🚀 Features
 
@@ -53,6 +53,7 @@ fintechdashboard/
 │   ├── public/             # Static assets
 │   ├── index.html          # HTML entry point
 │   └── package.json        # Frontend dependencies
+├── vercel.json             # Vercel monorepo configuration
 └── README.md               # Project documentation (this file)
 ```
 
@@ -88,7 +89,23 @@ The frontend application will be available at `http://localhost:5173`.
 | `analyst` | `analyst123` | Analyst |
 | `viewer` | `viewer123` | Viewer |
 
-### **Testing**
+---
+
+## 🌐 Vercel Deployment
+
+PocketPal is configured for mono-repo deployment on Vercel using `experimentalServices`.
+
+### **Service Configuration**
+- **Frontend**: Hosted at the root `/`.
+- **Backend**: Proxied via `/_/backend`. The GraphQL endpoint is available at `/_/backend/graphql`.
+
+### **Database Persistence (SQLite)**
+> [!WARNING]
+> Since this project uses SQLite (`fintech.db`), data persistence is limited on Vercel. Database changes will be lost when the service instance restarts or is redeployed. For production use, consider migrating to **Vercel Postgres** or another managed database.
+
+---
+
+## 🧪 Testing
 To run the back-end integration tests:
 ```bash
 cd backend

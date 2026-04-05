@@ -16,7 +16,15 @@ async function startServer() {
     message: 'Too many requests from this IP, please try again after 15 minutes',
   });
 
-  app.use('/graphql', limiter);
+  app.use(['/graphql', '/_/backend/graphql'], limiter);
+
+  // Rewriting for Vercel experimentalServices routing if prefix is not stripped
+  app.use((req, res, next) => {
+    if (req.url.startsWith('/_/backend')) {
+      req.url = req.url.replace('/_/backend', '');
+    }
+    next();
+  });
 
   const jwt = require('jsonwebtoken');
   const SECRET = process.env.JWT_SECRET || 'fint3ch_s3cr3t';
