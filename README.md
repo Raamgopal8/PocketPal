@@ -99,9 +99,25 @@ PocketPal is configured for mono-repo deployment on Vercel using `experimentalSe
 - **Frontend**: Hosted at the root `/`.
 - **Backend**: Proxied via `/_/backend`. The GraphQL endpoint is available at `/_/backend/graphql`.
 
-### **Database Persistence (SQLite)**
-> [!WARNING]
-> Since this project uses SQLite (`fintech.db`), data persistence is limited on Vercel. Database changes will be lost when the service instance restarts or is redeployed. For production use, consider migrating to **Vercel Postgres** or another managed database.
+### Database Setup (Vercel Postgres)
+
+PocketPal uses **Vercel Postgres** for production-grade persistence and compatibility with Vercel Serverless Functions.
+
+1.  **Create a Postgres Store**: In your Vercel Dashboard, go to **Storage** and create a new **Postgres** database.
+2.  **Connect to Project**: Link the Postgres store to your PocketPal project. This will automatically inject several environment variables, including `POSTGRES_URL`.
+3.  **Local Development**:
+    - Use a local PostgreSQL instance or a remote development database.
+    - Set `POSTGRES_URL` in a `.env` file in the `backend` directory.
+    - Example: `POSTGRES_URL=postgres://user:password@localhost:5432/pocketpal`
+
+### Environment Variables
+
+| Variable | Description | Default (Dev) |
+| :--- | :--- | :--- |
+| `POSTGRES_URL` | Connection string for PostgreSQL | **Required** |
+| `JWT_SECRET` | Secret key for token signing | `fint3ch_s3cr3t` |
+| `PORT` | Backend port | `4000` |
+| `VITE_API_URL` | (Frontend) Backend API endpoint | Proxied via Vercel |
 
 ---
 

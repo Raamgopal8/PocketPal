@@ -7,7 +7,7 @@ import { ApolloClient, InMemoryCache, ApolloProvider, createHttpLink } from '@ap
 import { setContext } from '@apollo/client/link/context/index.js'
 
 const API_URI = import.meta.env.VITE_API_URL || 
-  (import.meta.env.PROD ? 'https://pocket-pal-794x.vercel.app/_/backend/graphql' : 'http://localhost:4000/graphql');
+  (import.meta.env.PROD ? 'https://pocket-pal-8e8y-bjtk7wxyd-raamgopal8s-projects.vercel.app':'');
 
 const httpLink = createHttpLink({
   uri: API_URI,

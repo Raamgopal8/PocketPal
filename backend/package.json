@@ -18,8 +18,7 @@
     "express-rate-limit": "^8.3.2",
     "graphql": "^15.10.2",
     "jsonwebtoken": "^9.0.3",
-    "sqlite": "^5.1.1",
-    "sqlite3": "^6.0.1"
+    "pg": "^8.20.0"
   },
   "devDependencies": {
     "jest": "^30.3.0",

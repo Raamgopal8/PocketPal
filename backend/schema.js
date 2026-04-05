@@ -82,50 +82,53 @@ const resolvers = {
     me: async (_, __, { user }) => {
       if (!user) return null;
       const db = getDb();
-      return await db.get('SELECT id, username, role, status, created_at as createdAt FROM users WHERE id = ?', user.id);
+      const { rows } = await db.query('SELECT id, username, role, status, created_at as "createdAt" FROM users WHERE id = $1', [user.id]);
+      return rows[0] || null;
     },
     users: async (_, __, { user }) => {
       if (!user || user.role !== 'Admin') throw new AuthenticationError('Unauthorized');
       const db = getDb();
-      return await db.all('SELECT id, username, role, status, created_at as createdAt FROM users');
+      const { rows } = await db.query('SELECT id, username, role, status, created_at as "createdAt" FROM users');
+      return rows;
     },
     transactions: async (_, { type, category, startDate, endDate, search, page = 1, limit = 10 }, { user }) => {
       if (!user || (user.role !== 'Admin' && user.role !== 'Analyst')) throw new AuthenticationError('Unauthorized');
       
       const db = getDb();
-      let query = 'SELECT id, user_id as userId, amount, type, category, date, description, created_at as createdAt, deleted_at as deletedAt FROM transactions WHERE deleted_at IS NULL';
+      let query = 'SELECT id, user_id as "userId", amount, type, category, date, description, created_at as "createdAt", deleted_at as "deletedAt" FROM transactions WHERE deleted_at IS NULL';
       const params = [];
 
       if (type) {
-        query += ' AND type = ?';
         params.push(type);
+        query += ` AND type = $${params.length}`;
       }
       if (category) {
-        query += ' AND category = ?';
         params.push(category);
+        query += ` AND category = $${params.length}`;
       }
       if (startDate) {
-        query += ' AND date >= ?';
         params.push(startDate);
+        query += ` AND date >= $${params.length}`;
       }
       if (endDate) {
-        query += ' AND date <= ?';
         params.push(endDate);
+        query += ` AND date <= $${params.length}`;
       }
       if (search) {
-        query += ' AND (description LIKE ? OR category LIKE ?)';
-        params.push(`%${search}%`, `%${search}%`);
+        params.push(`%${search}%`);
+        query += ` AND (description ILIKE $${params.length} OR category ILIKE $${params.length})`;
       }
 
       // Get total count for pagination
-      const countQuery = query.replace('id, user_id as userId, amount, type, category, date, description, created_at as createdAt, deleted_at as deletedAt', 'COUNT(*) as count');
-      const countResult = await db.get(countQuery, ...params);
-      const totalCount = countResult.count;
+      const countQuery = `SELECT COUNT(*) as count FROM (${query}) as subquery`;
+      const { rows: countRows } = await db.query(countQuery, params);
+      const totalCount = parseInt(countRows[0].count);
 
       // Apply pagination
       const offset = (page - 1) * limit;
-      query += ' ORDER BY date DESC LIMIT ? OFFSET ?';
-      const transactions = await db.all(query, ...params, limit, offset);
+      params.push(limit, offset);
+      query += ` ORDER BY date DESC LIMIT $${params.length - 1} OFFSET $${params.length}`;
+      const { rows: transactions } = await db.query(query, params);
 
       return {
         transactions,
@@ -137,7 +140,7 @@ const resolvers = {
     },
     dashboardSummary: async () => {
       const db = getDb();
-      const transactions = await db.all('SELECT * FROM transactions WHERE deleted_at IS NULL');
+      const { rows: transactions } = await db.query('SELECT * FROM transactions WHERE deleted_at IS NULL');
       const income = transactions.filter(t => t.type === 'Income').reduce((sum, t) => sum + t.amount, 0);
       const expenses = transactions.filter(t => t.type === 'Expense').reduce((sum, t) => sum + t.amount, 0);
 
@@ -165,7 +168,8 @@ const resolvers = {
   Mutation: {
     login: async (_, { username, password }) => {
       const db = getDb();
-      const user = await db.get('SELECT * FROM users WHERE username = ?', username);
+      const { rows } = await db.query('SELECT * FROM users WHERE username = $1', [username]);
+      const user = rows[0];
       if (!user) throw new AuthenticationError('User Not Found or Access Blocked. Please contact admin');
       
       const valid = bcrypt.compareSync(password, user.password_hash);
@@ -188,11 +192,14 @@ const resolvers = {
     createTransaction: async (_, args, { user }) => {
       if (!user || user.role !== 'Admin') throw new AuthenticationError('Unauthorized');
       const db = getDb();
-      const result = await db.run('INSERT INTO transactions (user_id, amount, type, category, date, description) VALUES (?, ?, ?, ?, ?, ?)', 
-        user.id, args.amount, args.type, args.category, args.date, args.description);
+      const { rows: insertRows } = await db.query(
+        'INSERT INTO transactions (user_id, amount, type, category, date, description) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id', 
+        [user.id, args.amount, args.type, args.category, args.date, args.description]
+      );
       
-      const finalResult = await db.get('SELECT id, user_id as userId, amount, type, category, date, description, created_at as createdAt FROM transactions WHERE id = ?', result.lastID);
-      return finalResult;
+      const id = insertRows[0].id;
+      const { rows } = await db.query('SELECT id, user_id as "userId", amount, type, category, date, description, created_at as "createdAt" FROM transactions WHERE id = $1', [id]);
+      return rows[0];
     },
     updateTransaction: async (_, { id, ...args }, { user }) => {
       if (!user || user.role !== 'Admin') throw new AuthenticationError('Unauthorized');
@@ -203,30 +210,35 @@ const resolvers = {
       
       Object.keys(args).forEach(key => {
         if (args[key] !== undefined) {
-          fields.push(`${key} = ?`);
           params.push(args[key]);
+          fields.push(`${key} = $${params.length}`);
         }
       });
       
-      if (fields.length === 0) return await db.get('SELECT id, user_id as userId, amount, type, category, date, description, created_at as createdAt FROM transactions WHERE id = ?', id);
+      if (fields.length === 0) {
+        const { rows } = await db.query('SELECT id, user_id as "userId", amount, type, category, date, description, created_at as "createdAt" FROM transactions WHERE id = $1', [id]);
+        return rows[0];
+      }
       
       params.push(id);
-      const query = `UPDATE transactions SET ${fields.join(', ')} WHERE id = ?`;
-      await db.run(query, ...params);
+      const query = `UPDATE transactions SET ${fields.join(', ')} WHERE id = $${params.length}`;
+      await db.query(query, params);
       
-      return await db.get('SELECT id, user_id as userId, amount, type, category, date, description, created_at as createdAt FROM transactions WHERE id = ?', id);
+      const { rows } = await db.query('SELECT id, user_id as "userId", amount, type, category, date, description, created_at as "createdAt" FROM transactions WHERE id = $1', [id]);
+      return rows[0];
     },
     deleteTransaction: async (_, { id }, { user }) => {
       if (!user || user.role !== 'Admin') throw new AuthenticationError('Unauthorized');
       const db = getDb();
-      const info = await db.run('UPDATE transactions SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?', id);
-      return info.changes > 0;
+      const result = await db.query('UPDATE transactions SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1', [id]);
+      return result.rowCount > 0;
     },
     updateUserStatus: async (_, { id, status }, { user }) => {
       if (!user || user.role !== 'Admin') throw new AuthenticationError('Unauthorized');
       const db = getDb();
-      await db.run('UPDATE users SET status = ? WHERE id = ?', status, id);
-      return await db.get('SELECT id, username, role, status, created_at as createdAt FROM users WHERE id = ?', id);
+      await db.query('UPDATE users SET status = $1 WHERE id = $2', [status, id]);
+      const { rows } = await db.query('SELECT id, username, role, status, created_at as "createdAt" FROM users WHERE id = $1', [id]);
+      return rows[0];
     }
   }
 };
