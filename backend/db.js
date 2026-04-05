@@ -9,6 +9,11 @@ const pool = new Pool({
 });
 
 async function initializeDb() {
+  if (!process.env.POSTGRES_URL) {
+    console.warn('WARNING: POSTGRES_URL is not set. Database initialization skipped.');
+    return;
+  }
+
   const client = await pool.connect();
   try {
     // Create Tables

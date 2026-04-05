@@ -4,59 +4,72 @@ const cors = require('cors');
 const { typeDefs, resolvers } = require('./schema');
 const { initializeDb } = require('./db');
 const rateLimit = require('express-rate-limit');
+const jwt = require('jsonwebtoken');
 
-async function startServer() {
-  await initializeDb();
-  const app = express();
-  app.use(cors());
+const SECRET = process.env.JWT_SECRET || 'fint3ch_s3cr3t';
 
-  const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100, // Limit each IP to 100 requests per `window` (here, per 15 minutes)
-    standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
-    legacyHeaders: false, // Disable the `X-RateLimit-*` headers
-    message: 'Too many requests from this IP, please try again after 15 minutes',
-  });
+const app = express();
+app.use(cors());
 
-  app.use(['/graphql', '/_/backend/graphql'], limiter);
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, 
+  max: 100, 
+  standardHeaders: true, 
+  legacyHeaders: false, 
+  message: 'Too many requests from this IP, please try again after 15 minutes',
+});
 
-  // Rewriting for Vercel experimentalServices routing if prefix is not stripped
-  app.use((req, res, next) => {
-    if (req.url.startsWith('/_/backend')) {
-      req.url = req.url.replace('/_/backend', '');
-    }
-    next();
-  });
+app.use(['/graphql', '/_/backend/graphql'], limiter);
 
-  const jwt = require('jsonwebtoken');
-  const SECRET = process.env.JWT_SECRET || 'fint3ch_s3cr3t';
+// Rewriting for Vercel experimentalServices routing
+app.use((req, res, next) => {
+  if (req.url.startsWith('/_/backend')) {
+    req.url = req.url.replace('/_/backend', '');
+  }
+  next();
+});
 
-  const server = new ApolloServer({
-    typeDefs,
-    resolvers,
-    context: ({ req }) => {
-      const token = req.headers.authorization || '';
-      if (token) {
-        try {
-          const user = jwt.verify(token.replace('Bearer ', ''), SECRET);
-          return { user };
-        } catch (err) {
-          console.error('Invalid token');
-        }
+const server = new ApolloServer({
+  typeDefs,
+  resolvers,
+  context: ({ req }) => {
+    const token = req.headers.authorization || '';
+    if (token) {
+      try {
+        const user = jwt.verify(token.replace('Bearer ', ''), SECRET);
+        return { user };
+      } catch (err) {
+        console.error('Invalid token');
       }
-      return { user: null };
     }
-  });
+    return { user: null };
+  }
+});
 
+let serverStarted = false;
+
+async function startApolloServer() {
+  if (serverStarted) return;
+  await initializeDb();
   await server.start();
   server.applyMiddleware({ app });
+  serverStarted = true;
+}
 
+// Handler for Vercel
+const handler = async (req, res) => {
+  await startApolloServer();
+  return app(req, res);
+};
+
+// Locally
+if (require.main === module) {
   const PORT = process.env.PORT || 4000;
-  app.listen(PORT, () => {
-    console.log(`🚀 Server ready at http://localhost:${PORT}${server.graphqlPath}`);
+  startApolloServer().then(() => {
+    app.listen(PORT, () => {
+      console.log(`🚀 Server ready at http://localhost:${PORT}${server.graphqlPath}`);
+    });
   });
 }
 
-startServer().catch(err => {
-  console.error('Failed to start server:', err);
-});
+module.exports = handler;

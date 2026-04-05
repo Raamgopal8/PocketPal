@@ -28,7 +28,7 @@
 
 - **Frontend**: React 19, Vite, Apollo Client, React Router 7, Bootstrap, GSAP, Lucide React.
 - **Backend**: Node.js, Express, Apollo Server Express, GraphQL, JWT, bcryptjs.
-- **Database**: SQLite (better-sqlite3).
+- **Database**: Postgresql.
 
 ---
 
