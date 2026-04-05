@@ -1,5 +1,5 @@
 const { gql, AuthenticationError } = require('apollo-server-express');
-const db = require('./db');
+const { getDb } = require('./db');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
@@ -79,17 +79,20 @@ const typeDefs = gql`
 
 const resolvers = {
   Query: {
-    me: (_, __, { user }) => {
+    me: async (_, __, { user }) => {
       if (!user) return null;
-      return db.prepare('SELECT id, username, role, status, created_at as createdAt FROM users WHERE id = ?').get(user.id);
+      const db = getDb();
+      return await db.get('SELECT id, username, role, status, created_at as createdAt FROM users WHERE id = ?', user.id);
     },
-    users: (_, __, { user }) => {
+    users: async (_, __, { user }) => {
       if (!user || user.role !== 'Admin') throw new AuthenticationError('Unauthorized');
-      return db.prepare('SELECT id, username, role, status, created_at as createdAt FROM users').all();
+      const db = getDb();
+      return await db.all('SELECT id, username, role, status, created_at as createdAt FROM users');
     },
-    transactions: (_, { type, category, startDate, endDate, search, page = 1, limit = 10 }, { user }) => {
+    transactions: async (_, { type, category, startDate, endDate, search, page = 1, limit = 10 }, { user }) => {
       if (!user || (user.role !== 'Admin' && user.role !== 'Analyst')) throw new AuthenticationError('Unauthorized');
       
+      const db = getDb();
       let query = 'SELECT id, user_id as userId, amount, type, category, date, description, created_at as createdAt, deleted_at as deletedAt FROM transactions WHERE deleted_at IS NULL';
       const params = [];
 
@@ -116,12 +119,13 @@ const resolvers = {
 
       // Get total count for pagination
       const countQuery = query.replace('id, user_id as userId, amount, type, category, date, description, created_at as createdAt, deleted_at as deletedAt', 'COUNT(*) as count');
-      const totalCount = db.prepare(countQuery).get(...params).count;
+      const countResult = await db.get(countQuery, ...params);
+      const totalCount = countResult.count;
 
       // Apply pagination
       const offset = (page - 1) * limit;
       query += ' ORDER BY date DESC LIMIT ? OFFSET ?';
-      const transactions = db.prepare(query).all(...params, limit, offset);
+      const transactions = await db.all(query, ...params, limit, offset);
 
       return {
         transactions,
@@ -131,8 +135,9 @@ const resolvers = {
         hasMore: offset + transactions.length < totalCount
       };
     },
-    dashboardSummary: () => {
-      const transactions = db.prepare('SELECT * FROM transactions WHERE deleted_at IS NULL').all();
+    dashboardSummary: async () => {
+      const db = getDb();
+      const transactions = await db.all('SELECT * FROM transactions WHERE deleted_at IS NULL');
       const income = transactions.filter(t => t.type === 'Income').reduce((sum, t) => sum + t.amount, 0);
       const expenses = transactions.filter(t => t.type === 'Expense').reduce((sum, t) => sum + t.amount, 0);
 
@@ -158,8 +163,9 @@ const resolvers = {
     }
   },
   Mutation: {
-    login: (_, { username, password }) => {
-      const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+    login: async (_, { username, password }) => {
+      const db = getDb();
+      const user = await db.get('SELECT * FROM users WHERE username = ?', username);
       if (!user) throw new AuthenticationError('User Not Found or Access Blocked. Please contact admin');
       
       const valid = bcrypt.compareSync(password, user.password_hash);
@@ -179,16 +185,19 @@ const resolvers = {
         }
       };
     },
-    createTransaction: (_, args, { user }) => {
+    createTransaction: async (_, args, { user }) => {
       if (!user || user.role !== 'Admin') throw new AuthenticationError('Unauthorized');
-      const info = db.prepare('INSERT INTO transactions (user_id, amount, type, category, date, description) VALUES (?, ?, ?, ?, ?, ?)')
-        .run(user.id, args.amount, args.type, args.category, args.date, args.description);
-      const result = db.prepare('SELECT id, user_id as userId, amount, type, category, date, description, created_at as createdAt FROM transactions WHERE id = ?').get(info.lastInsertRowid);
-      return result;
+      const db = getDb();
+      const result = await db.run('INSERT INTO transactions (user_id, amount, type, category, date, description) VALUES (?, ?, ?, ?, ?, ?)', 
+        user.id, args.amount, args.type, args.category, args.date, args.description);
+      
+      const finalResult = await db.get('SELECT id, user_id as userId, amount, type, category, date, description, created_at as createdAt FROM transactions WHERE id = ?', result.lastID);
+      return finalResult;
     },
-    updateTransaction: (_, { id, ...args }, { user }) => {
+    updateTransaction: async (_, { id, ...args }, { user }) => {
       if (!user || user.role !== 'Admin') throw new AuthenticationError('Unauthorized');
       
+      const db = getDb();
       const fields = [];
       const params = [];
       
@@ -199,23 +208,25 @@ const resolvers = {
         }
       });
       
-      if (fields.length === 0) return db.prepare('SELECT id, user_id as userId, amount, type, category, date, description, created_at as createdAt FROM transactions WHERE id = ?').get(id);
+      if (fields.length === 0) return await db.get('SELECT id, user_id as userId, amount, type, category, date, description, created_at as createdAt FROM transactions WHERE id = ?', id);
       
       params.push(id);
       const query = `UPDATE transactions SET ${fields.join(', ')} WHERE id = ?`;
-      db.prepare(query).run(...params);
+      await db.run(query, ...params);
       
-      return db.prepare('SELECT id, user_id as userId, amount, type, category, date, description, created_at as createdAt FROM transactions WHERE id = ?').get(id);
+      return await db.get('SELECT id, user_id as userId, amount, type, category, date, description, created_at as createdAt FROM transactions WHERE id = ?', id);
     },
-    deleteTransaction: (_, { id }, { user }) => {
+    deleteTransaction: async (_, { id }, { user }) => {
       if (!user || user.role !== 'Admin') throw new AuthenticationError('Unauthorized');
-      const info = db.prepare('UPDATE transactions SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?').run(id);
+      const db = getDb();
+      const info = await db.run('UPDATE transactions SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?', id);
       return info.changes > 0;
     },
-    updateUserStatus: (_, { id, status }, { user }) => {
+    updateUserStatus: async (_, { id, status }, { user }) => {
       if (!user || user.role !== 'Admin') throw new AuthenticationError('Unauthorized');
-      db.prepare('UPDATE users SET status = ? WHERE id = ?').run(status, id);
-      return db.prepare('SELECT id, username, role, status, created_at as createdAt FROM users WHERE id = ?').get(id);
+      const db = getDb();
+      await db.run('UPDATE users SET status = ? WHERE id = ?', status, id);
+      return await db.get('SELECT id, username, role, status, created_at as createdAt FROM users WHERE id = ?', id);
     }
   }
 };

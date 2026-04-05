@@ -2,9 +2,11 @@ const express = require('express');
 const { ApolloServer } = require('apollo-server-express');
 const cors = require('cors');
 const { typeDefs, resolvers } = require('./schema');
+const { initializeDb } = require('./db');
 const rateLimit = require('express-rate-limit');
 
 async function startServer() {
+  await initializeDb();
   const app = express();
   app.use(cors());
 

@@ -2,12 +2,13 @@ const request = require('supertest');
 const express = require('express');
 const { ApolloServer } = require('apollo-server-express');
 const { typeDefs, resolvers } = require('../schema');
-const db = require('../db');
+const { initializeDb, getDb } = require('../db');
 
 let server;
 let app;
 
 beforeAll(async () => {
+  await initializeDb();
   app = express();
   server = new ApolloServer({
     typeDefs,
@@ -88,9 +89,7 @@ describe('GraphQL Mutations', () => {
     
     const id = createRes.body.data.createTransaction.id;
 
-    // 2. Clear deleted_at just in case (though it should be default NULL)
-    
-    // 3. Delete it
+    // 2. Delete it
     const deleteRes = await request(app)
       .post('/graphql')
       .send({
@@ -104,7 +103,7 @@ describe('GraphQL Mutations', () => {
     
     expect(deleteRes.body.data.deleteTransaction).toBe(true);
 
-    // 4. Verify it's not in the regular list
+    // 3. Verify it's not in the regular list
     const listRes = await request(app)
       .post('/graphql')
       .send({
@@ -122,8 +121,9 @@ describe('GraphQL Mutations', () => {
     const ids = listRes.body.data.transactions.transactions.map(t => t.id);
     expect(ids).not.toContain(id);
 
-    // 5. Verify it's in the database with deleted_at set (manual DB check)
-    const row = db.prepare('SELECT deleted_at FROM transactions WHERE id = ?').get(id);
+    // 4. Verify it's in the database with deleted_at set (manual DB check)
+    const db = getDb();
+    const row = await db.get('SELECT deleted_at FROM transactions WHERE id = ?', id);
     expect(row.deleted_at).not.toBeNull();
   });
 });
