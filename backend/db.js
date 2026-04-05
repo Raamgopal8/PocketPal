@@ -1,15 +1,15 @@
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 
-const pool = new Pool({
+const pool = process.env.POSTGRES_URL ? new Pool({
   connectionString: process.env.POSTGRES_URL,
   ssl: {
     rejectUnauthorized: false
   }
-});
+}) : null;
 
 async function initializeDb() {
-  if (!process.env.POSTGRES_URL) {
+  if (!pool) {
     console.warn('WARNING: POSTGRES_URL is not set. Database initialization skipped.');
     return;
   }
@@ -80,5 +80,8 @@ async function initializeDb() {
 
 module.exports = {
   initializeDb,
-  getDb: () => pool
+  getDb: () => {
+    if (!pool) throw new Error('Database not initialized. Check POSTGRES_URL environment variable.');
+    return pool;
+  }
 };
