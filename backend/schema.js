@@ -81,66 +81,67 @@ const resolvers = {
   Query: {
     me: async (_, __, { user }) => {
       if (!user) return null;
-      const db = getDb();
-      const { rows } = await db.query('SELECT id, username, role, status, created_at as "createdAt" FROM users WHERE id = ?', [user.id]);
-      return rows[0] || null;
+      const db = getDb().firestore;
+      const doc = await db.collection('users').doc(user.id.toString()).get();
+      if (!doc.exists) return null;
+      const data = doc.data();
+      return { ...data, id: doc.id, createdAt: data.created_at?.toDate?.()?.toISOString() || data.created_at };
     },
     users: async (_, __, { user }) => {
       if (!user || user.role !== 'Admin') throw new AuthenticationError('Unauthorized');
-      const db = getDb();
-      const { rows } = await db.query('SELECT id, username, role, status, created_at as "createdAt" FROM users');
-      return rows;
+      const db = getDb().firestore;
+      const snapshot = await db.collection('users').get();
+      return snapshot.docs.map(doc => {
+        const data = doc.data();
+        return { ...data, id: doc.id, createdAt: data.created_at?.toDate?.()?.toISOString() || data.created_at };
+      });
     },
     transactions: async (_, { type, category, startDate, endDate, search, page = 1, limit = 10 }, { user }) => {
       if (!user || (user.role !== 'Admin' && user.role !== 'Analyst')) throw new AuthenticationError('Unauthorized');
       
-      const db = getDb();
-      let query = 'SELECT id, user_id as "userId", amount, type, category, date, description, created_at as "createdAt", deleted_at as "deletedAt" FROM transactions WHERE deleted_at IS NULL';
-      const params = [];
+      const db = getDb().firestore;
+      let query = db.collection('transactions').where('deleted_at', '==', null);
 
-      if (type) {
-        params.push(type);
-        query += ` AND type = ?`;
-      }
-      if (category) {
-        params.push(category);
-        query += ` AND category = ?`;
-      }
-      if (startDate) {
-        params.push(startDate);
-        query += ` AND date >= ?`;
-      }
-      if (endDate) {
-        params.push(endDate);
-        query += ` AND date <= ?`;
-      }
+      if (type) query = query.where('type', '==', type);
+      if (category) query = query.where('category', '==', category);
+      if (startDate) query = query.where('date', '>=', startDate);
+      if (endDate) query = query.where('date', '<=', endDate);
+
+      // Firestore doesn't support LIKE. We'll fetch and filter if search is provided.
+      // Or we can use a simpler approach for now.
+      const snapshot = await query.orderBy('date', 'desc').get();
+      let transactions = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+
       if (search) {
-        params.push(`%${search}%`, `%${search}%`);
-        query += ` AND (description LIKE ? OR category LIKE ?)`;
+        const s = search.toLowerCase();
+        transactions = transactions.filter(t => 
+          (t.description && t.description.toLowerCase().includes(s)) || 
+          (t.category && t.category.toLowerCase().includes(s))
+        );
       }
 
-      // Get total count for pagination
-      const countQuery = `SELECT COUNT(*) as count FROM (${query}) as subquery`;
-      const { rows: countRows } = await db.query(countQuery, params);
-      const totalCount = parseInt(countRows[0].count);
-
-      // Apply pagination
+      const totalCount = transactions.length;
       const offset = (page - 1) * limit;
-      params.push(limit, offset);
-      query += ` ORDER BY date DESC LIMIT ? OFFSET ?`;
-      const { rows: transactions } = await db.query(query, params);
+      const paginatedTransactions = transactions.slice(offset, offset + limit).map(t => ({
+        ...t,
+        userId: t.user_id,
+        createdAt: t.created_at?.toDate?.()?.toISOString() || t.created_at
+      }));
 
       return {
-        transactions,
+        transactions: paginatedTransactions,
         totalCount,
         page,
         limit,
-        hasMore: offset + transactions.length < totalCount
+        hasMore: offset + paginatedTransactions.length < totalCount
       };
     },
-    dashboardSummary: async () => {
-      const db = getDb();
-      const { rows: transactions } = await db.query('SELECT * FROM transactions WHERE deleted_at IS NULL');
+    dashboardSummary: async (_, __, { user }) => {
+      if (!user) throw new AuthenticationError('Unauthorized');
+      const db = getDb().firestore;
+      const snapshot = await db.collection('transactions').where('deleted_at', '==', null).get();
+      const transactions = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+      
       const income = transactions.filter(t => t.type === 'Income').reduce((sum, t) => sum + t.amount, 0);
       const expenses = transactions.filter(t => t.type === 'Expense').reduce((sum, t) => sum + t.amount, 0);
 
@@ -159,7 +160,7 @@ const resolvers = {
         recentTransactions: transactions.slice(0, 5).map(t => ({
           ...t,
           userId: t.user_id,
-          createdAt: t.created_at
+          createdAt: t.created_at?.toDate?.()?.toISOString() || t.created_at
         })),
         categoryBreakdown: Object.values(categories)
       };
@@ -167,11 +168,13 @@ const resolvers = {
   },
   Mutation: {
     login: async (_, { username, password }) => {
-      const db = getDb();
-      const { rows } = await db.query('SELECT * FROM users WHERE username = ?', [username]);
-      const user = rows[0];
-      if (!user) throw new AuthenticationError('User Not Found or Access Blocked. Please contact admin');
+      const db = getDb().firestore;
+      const snapshot = await db.collection('users').where('username', '==', username).get();
+      const userDoc = snapshot.docs[0];
       
+      if (!userDoc) throw new AuthenticationError('User Not Found or Access Blocked. Please contact admin');
+      
+      const user = userDoc.data();
       const valid = bcrypt.compareSync(password, user.password_hash);
       if (!valid) throw new AuthenticationError('Invalid password');
       
@@ -179,65 +182,65 @@ const resolvers = {
         throw new AuthenticationError('Your account has been deactivated. Please contact support.');
       }
       
-      const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, SECRET, { expiresIn: '1d' });
+      const token = jwt.sign({ id: userDoc.id, username: user.username, role: user.role }, SECRET, { expiresIn: '1d' });
       
       return {
         token,
         user: {
           ...user,
-          createdAt: user.created_at
+          id: userDoc.id,
+          createdAt: user.created_at?.toDate?.()?.toISOString() || user.created_at
         }
       };
     },
     createTransaction: async (_, args, { user }) => {
       if (!user || user.role !== 'Admin') throw new AuthenticationError('Unauthorized');
-      const db = getDb();
-      const { lastID } = await db.query(
-        'INSERT INTO transactions (user_id, amount, type, category, date, description) VALUES (?, ?, ?, ?, ?, ?)', 
-        [user.id, args.amount, args.type, args.category, args.date, args.description]
-      );
-      
-      const { rows } = await db.query('SELECT id, user_id as "userId", amount, type, category, date, description, created_at as "createdAt" FROM transactions WHERE id = ?', [lastID]);
-      return rows[0];
+      const db = getDb().firestore;
+      const newTransaction = {
+        user_id: user.id,
+        ...args,
+        created_at: new Date().toISOString(), // Use ISO string for simplicity or FieldValue
+        deleted_at: null
+      };
+      const docRef = await db.collection('transactions').add(newTransaction);
+      const doc = await docRef.get();
+      return { ...doc.data(), id: doc.id, userId: user.id, createdAt: newTransaction.created_at };
     },
     updateTransaction: async (_, { id, ...args }, { user }) => {
       if (!user || user.role !== 'Admin') throw new AuthenticationError('Unauthorized');
       
-      const db = getDb();
-      const fields = [];
-      const params = [];
+      const db = getDb().firestore;
+      const docRef = db.collection('transactions').doc(id);
+      const doc = await docRef.get();
       
+      if (!doc.exists) throw new Error('Transaction not found');
+      
+      const updateData = {};
       Object.keys(args).forEach(key => {
-        if (args[key] !== undefined) {
-          params.push(args[key]);
-          fields.push(`${key} = $${params.length}`);
-        }
+        if (args[key] !== undefined) updateData[key] = args[key];
       });
       
-      if (fields.length === 0) {
-        const { rows } = await db.query('SELECT id, user_id as "userId", amount, type, category, date, description, created_at as "createdAt" FROM transactions WHERE id = $1', [id]);
-        return rows[0];
+      if (Object.keys(updateData).length > 0) {
+        await docRef.update(updateData);
       }
       
-      params.push(id);
-      const query = `UPDATE transactions SET ${fields.join(', ')} WHERE id = ?`;
-      await db.query(query, params);
-      
-      const { rows } = await db.query('SELECT id, user_id as "userId", amount, type, category, date, description, created_at as "createdAt" FROM transactions WHERE id = ?', [id]);
-      return rows[0];
+      const updatedDoc = await docRef.get();
+      const data = updatedDoc.data();
+      return { ...data, id: updatedDoc.id, userId: data.user_id, createdAt: data.created_at };
     },
     deleteTransaction: async (_, { id }, { user }) => {
       if (!user || user.role !== 'Admin') throw new AuthenticationError('Unauthorized');
-      const db = getDb();
-      const result = await db.query('UPDATE transactions SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?', [id]);
-      return result.rowCount > 0;
+      const db = getDb().firestore;
+      await db.collection('transactions').doc(id).update({ deleted_at: new Date().toISOString() });
+      return true;
     },
     updateUserStatus: async (_, { id, status }, { user }) => {
       if (!user || user.role !== 'Admin') throw new AuthenticationError('Unauthorized');
-      const db = getDb();
-      await db.query('UPDATE users SET status = ? WHERE id = ?', [status, id]);
-      const { rows } = await db.query('SELECT id, username, role, status, created_at as "createdAt" FROM users WHERE id = ?', [id]);
-      return rows[0];
+      const db = getDb().firestore;
+      await db.collection('users').doc(id).update({ status });
+      const doc = await db.collection('users').doc(id).get();
+      const data = doc.data();
+      return { ...data, id: doc.id, createdAt: data.created_at };
     }
   }
 };

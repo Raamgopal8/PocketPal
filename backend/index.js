@@ -6,29 +6,27 @@ const { typeDefs, resolvers } = require('./schema');
 const { initializeDb } = require('./db');
 const rateLimit = require('express-rate-limit');
 const jwt = require('jsonwebtoken');
+const functions = require('firebase-functions');
+const { onRequest } = require('firebase-functions/v2/https');
 
 const SECRET = process.env.JWT_SECRET || 'fint3ch_s3cr3t';
 
 const app = express();
+app.set('trust proxy', true);
 app.use(cors());
 
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, 
-  max: 100, 
-  standardHeaders: true, 
-  legacyHeaders: false, 
-  message: 'Too many requests from this IP, please try again after 15 minutes',
-});
+// Temporarily disabled to resolve IPv6/Proxy validation errors in Cloud Functions
+// const limiter = rateLimit({
+//   windowMs: 15 * 60 * 1000, 
+//   max: 100, 
+//   standardHeaders: true, 
+//   legacyHeaders: false, 
+//   keyGenerator: (req) => req.ip || req.get('X-Forwarded-For') || 'default',
+//   message: 'Too many requests from this IP, please try again after 15 minutes',
+// });
 
-app.use(['/graphql', '/_/backend/graphql'], limiter);
-
-// Rewriting for Vercel experimentalServices routing
-app.use((req, res, next) => {
-  if (req.url.startsWith('/_/backend')) {
-    req.url = req.url.replace('/_/backend', '');
-  }
-  next();
-});
+// App hosting / Firebase Functions might have different pathing
+// app.use(['/graphql', '/api/graphql'], limiter);
 
 const server = new ApolloServer({
   typeDefs,
@@ -53,15 +51,17 @@ async function startApolloServer() {
   if (serverStarted) return;
   await initializeDb();
   await server.start();
-  server.applyMiddleware({ app });
+  // Ensure we use the correct path for the middleware
+  server.applyMiddleware({ app, path: '/graphql' });
   serverStarted = true;
 }
 
-// Handler for Vercel
-const handler = async (req, res) => {
+// Specifically for Firebase Functions v2
+// Explicitly set invoker: 'public' to ensure accessibility
+const api_v2 = onRequest({ cors: true, invoker: 'public' }, async (req, res) => {
   await startApolloServer();
   return app(req, res);
-};
+});
 
 // Locally
 if (require.main === module) {
@@ -73,4 +73,6 @@ if (require.main === module) {
   });
 }
 
-module.exports = handler;
+// Export the function name defined in firebase.json
+// Migrated to api_v2 to resolve direct upgrade restriction
+exports.api_v2 = api_v2;

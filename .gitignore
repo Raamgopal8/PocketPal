@@ -1,0 +1,7 @@
+improvement_notes.md
+node_modules/
+dist/
+.firebase/
+functions/node_modules/
+backend/node_modules/
+.env

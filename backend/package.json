@@ -3,12 +3,20 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "jest"
+    "test": "jest",
+    "serve": "firebase emulators:start --only functions",
+    "shell": "firebase functions:shell",
+    "start": "node index.js",
+    "deploy": "firebase deploy --only functions",
+    "logs": "firebase functions:log"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "description": "",
+  "engines": {
+    "node": "22"
+  },
   "dependencies": {
     "apollo-server-express": "^3.13.0",
     "bcryptjs": "^3.0.3",
@@ -18,7 +26,9 @@
     "express-rate-limit": "^8.3.2",
     "graphql": "^15.10.2",
     "jsonwebtoken": "^9.0.3",
-    "sqlite3": "^6.0.1"
+    "sqlite3": "^6.0.1",
+    "firebase-admin": "^13.0.0",
+    "firebase-functions": "^6.0.0"
   },
   "devDependencies": {
     "jest": "^30.3.0",
